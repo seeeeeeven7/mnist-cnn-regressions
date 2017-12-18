@@ -1,6 +1,9 @@
 from mnist import MNIST
 import numpy as np
 import random
+import variable as var
+import cell
+import network
 
 # 数据准备
 
@@ -25,169 +28,144 @@ def toOneHot(labels):
 labels = toOneHot(labels)
 labels_test = toOneHot(labels_test)
 
+# 构造网络
+
+cnn = network.Network();
+#cnn.logForwardPropgation = True
+#cnn.logBackwardPropagation = True
+
 # 输入层
+X = var.Variable(np.zeros([28, 28, 1]))
+Y = var.Variable(np.zeros([1, 10]))
+KeepProb = var.Variable(0)
 
-class Variable:
-	def __init__(self, value = None):
-		if value is not None:
-			self.value = value
-			self.gradient = np.zeros_like(value, dtype=np.float)
-		else:
-			self.gradient = None
-	def __str__(self):
-		return '{ value =\n' + str(self.value) + ',\n gradient =\n' + str(self.gradient) + '}';
-	def __repr__(self):
-		return self.__str__();
-	def getOutput(self):
-		return self
-	def takeInput(self, value):
-		self.value = value;
-		self.gradient = np.zeros_like(value, dtype=np.float)
-	def applyGradient(self, step_size):
-		self.value = self.value + self.gradient * step_size
-		self.gradient = np.zeros_like(self.gradient, dtype=np.float)
-	@staticmethod
-	def random():
-		return Variable(random.random() * 2 - 1);
+# 卷积层 I
+WC1 = var.Variable(np.random.randn(5, 5, 1, 32) / 10)
+cnn.appendVariable(WC1)
 
-class Cell:
-	def getOutput(self):
-		return self.output
+convCell1 = cell.ConvolutionCell(X, WC1) # => [28, 28, 32]
+cnn.appendCell(convCell1)
 
-class SCell(Cell):
-	def __init__(self, input):
-		self.input = input
+# 激活层 I
+BC1 = var.Variable(np.ones(32) / 10)
+cnn.appendVariable(BC1)
 
-class DCell(Cell):
-	def __init__(self, input0, input1):
-		self.input0 = input0
-		self.input1 = input1
+reluCell1 = cell.ReLuCellType1(convCell1, BC1) # => [28, 28, 32]
+cnn.appendCell(reluCell1)
 
-class AddCell(DCell):
-	def forwardPropagation(self):
-		self.output = Variable(self.input0.getOutput().value + self.input1.getOutput().value)
-	def backwardPropagation(self):
-		self.input0.getOutput().gradient += self.output.gradient
-		self.input1.getOutput().gradient += self.output.gradient
+# 池化层 I
+mpCell1 = cell.MaxPoolingCell(reluCell1, [2, 2]) # => [14, 14, 32]
+cnn.appendCell(mpCell1)
 
-class MatMulCell(DCell):
-	def forwardPropagation(self):
-		self.output = Variable(np.dot(self.input0.getOutput().value, self.input1.getOutput().value))
-	def backwardPropagation(self):
-		self.input0.getOutput().gradient += np.dot(self.output.gradient, self.input1.getOutput().value.T)
-		self.input1.getOutput().gradient += np.dot(self.input0.getOutput().value.T, self.output.gradient)
+# 卷积层 II
+WC2 = var.Variable(np.random.randn(5, 5, 32, 64) / 10)
+cnn.appendVariable(WC2)
 
-class SoftmaxCell(SCell):
-	def forwardPropagation(self):
-		self.output = Variable(np.exp(self.input.getOutput().value) / np.sum(np.exp(self.input.getOutput().value)))
-	def backwardPropagation(self):
-		self.input.getOutput().gradient += -np.sum(self.output.gradient * self.output.value) * self.output.value + self.output.gradient * self.output.value;
+convCell2 = cell.ConvolutionCell(mpCell1, WC2) # => [14, 14, 64]
+cnn.appendCell(convCell2)
 
-class CrossEntropyCell(DCell):
-	def forwardPropagation(self):
-		self.output = Variable(-np.sum(np.log(self.input0.getOutput().value) * self.input1.getOutput().value))
-	def backwardPropagation(self):
-		self.input0.getOutput().gradient += self.output.gradient * -self.input1.getOutput().value / self.input0.getOutput().value
-		self.input1.getOutput().gradient += self.output.gradient * -np.log(self.input0.getOutput().value)
+# ReLu Layer 2
+BC2 = var.Variable(np.ones(64) / 10)
+cnn.appendVariable(BC2)
 
-class Convolution2DCell(Cell):
-	def __init__(self, input, core):
-		self.input = input
-		self.core = core
-	def forwardPropagation(self):
-		
+reluCell2 = cell.ReLuCellType1(convCell2, BC2) # => [14, 14, 64]
+cnn.appendCell(reluCell2)
 
-class Network:
-	def __init__(self):
-		self.variables = [];
-		self.cells = [];
-	def getVariablesAmount(self):
-		return len(self.variables);
-	def getCellsAmount(self):
-		return len(self.cells);
-	def appendVariable(self, variable):
-		self.variables.append(variable);
-	def appendCell(self, cell):
-		self.cells.append(cell);
-	def forwardPropagation(self):
-		for cell in self.cells:
-			cell.forwardPropagation();
-	def backwardPropagation(self):
-		for cell in reversed(self.cells):
-			cell.backwardPropagation();
-	def applyGradient(self, step_size):
-		for variable in self.variables:
-			variable.applyGradient(step_size);
+# Max-Pooling Layer 2
+mpCell2 = cell.MaxPoolingCell(reluCell2, [2, 2]) # => [7, 7, 64]
+cnn.appendCell(mpCell2)
 
-# Network
-network = Network();
+# Re-Shape Layer 
+rsCell = cell.ReShapeCell(mpCell2, [1, 7 * 7 * 64]) # => [1, 7 * 7 * 64]
+cnn.appendCell(rsCell)
 
-# Variables
-W = Variable(np.zeros([784, 10]))
-network.appendVariable(W);
+# Full-Connected Layer 1
+WFC1 = var.Variable(np.random.randn(7 * 7 * 64, 1024) / 10)
+cnn.appendVariable(WFC1)
 
-B = Variable(np.zeros([1, 10]))
-network.appendVariable(B);
+matmulCell1 = cell.MatMulCell(rsCell, WFC1) # => [1, 1024]
+cnn.appendCell(matmulCell1)
 
-# Inputs Layer
-X = Variable(np.zeros([1, 784]))
-Y = Variable(np.zeros([1, 10]))
+BFC1 = var.Variable(np.ones(1024) / 10)
+cnn.appendVariable(BFC1)
 
-# Weighted-Sum
-matmulCell = MatMulCell(X, W) # X * W => [10, 1]
-network.appendCell(matmulCell)
+reluCell3 = cell.ReLuCellType2(matmulCell1, BFC1)
+cnn.appendCell(reluCell3)
 
-# Bias
-addCell = AddCell(matmulCell, B) # X * W + B => [10, 1]
-network.appendCell(addCell)
+# Drop-out Layer
+KeepProb = var.Variable(np.array(0)) # Input
+
+dropoutCell = cell.DropoutCell(reluCell3, KeepProb) # => [1, 1024]
+cnn.appendCell(dropoutCell)
+
+# Full-Connected Layer 2
+WFC2 = var.Variable(np.random.randn(1024, 10) / 10)
+cnn.appendVariable(WFC2)
+
+matmulCell2 = cell.MatMulCell(dropoutCell, WFC2) # => [1, 10]
+cnn.appendCell(matmulCell2)
+
+BFC2 = var.Variable(np.ones([1, 10]) / 10)
+cnn.appendVariable(BFC2)
+
+addCell = cell.AddCell(matmulCell2, BFC2) # => [1, 10]
+cnn.appendCell(addCell)
 
 # Softmax
-softmaxCell = SoftmaxCell(addCell) # Softmax(X * W + B) => [10, 1]
-network.appendCell(softmaxCell)
+softmaxCell = cell.SoftmaxCell(addCell) # Softmax(X * W + B) => [10, 1]
+cnn.appendCell(softmaxCell)
 
 # Loss (Cross-entropy)
-loss = CrossEntropyCell(softmaxCell, Y) # CrossEntropy(Softmax(X * W + B), Y) => Loss
-network.appendCell(loss)
+loss = cell.CrossEntropyCell(softmaxCell, Y) # CrossEntropy(Softmax(X * W + B), Y) => Loss
+cnn.appendCell(loss)
 
 # Training
-BATCH_NUMBER = 1000 # BATCH的数量
-BATCH_SIZE = 100 # BATCH的大小
-LEARNING_RATE = 0.5 #学习速率
-for batch_index in range(BATCH_NUMBER ):
+BATCH_NUMBER = 20000 # BATCH的数量
+BATCH_SIZE = 50 # BATCH的大小
+LEARNING_RATE = 0.0001 #学习速率
+for batch_index in range(BATCH_NUMBER):
     # 构造一个BATCH
     batch_xs = [];
     batch_ys = [];
     for data_index in range(BATCH_SIZE):
-        j = random.randint(0, len(images) - 1)
-        x = images[j][np.newaxis];
-        y = labels[j][np.newaxis];
+        # j = random.randint(0, len(images) - 1)
+        j = data_index
+        x = images[j];
+        y = labels[j];
         batch_xs.append(x);
         batch_ys.append(y);
 
     # 使用这个BATCH进行训练
     batch_loss = 0
+    batch_precision = 0
     for data_index in range(BATCH_SIZE):
         x = batch_xs[data_index];
         y = batch_ys[data_index];
         X.takeInput(x);
         Y.takeInput(y);
-        network.forwardPropagation() # 正向传播
+        KeepProb.takeInput(np.array(0.5));
+        cnn.forwardPropagation() # 正向传播
         batch_loss += loss.getOutput().value # 统计整个BATCH的损失
         loss.getOutput().gradient = -1 / BATCH_SIZE # 整个BATCH统一计算梯度，所以单个数据点的输出梯度只有1/BATCH_SIZE
-        network.backwardPropagation() # 反向传播
-    
-    # 引用梯度
-    network.applyGradient(LEARNING_RATE)
-    print('batch', batch_index, ', loss =', batch_loss)
+        cnn.backwardPropagation() # 反向传播
+        # print('    data', data_index, ', loss =', loss.getOutput().value)
+        predict = np.argmax(softmaxCell.getOutput().value)
+        if predict == np.argmax(y):
+        	batch_precision += 1 / BATCH_SIZE
+
+    # 应用梯度
+    cnn.applyGradient(LEARNING_RATE)
+    print('batch', batch_index, ', loss =', batch_loss, ', precision =', batch_precision)
 
 # Test
 precision = 0
 for index in range(len(images_test)):
-    x = images_test[index][np.newaxis];
-    y = labels_test[index][np.newaxis];
+    x = images_test[index];
+    y = labels_test[index];
     X.takeInput(x);
     Y.takeInput(y);
-    network.forwardPropagation()
+    KeepProb.takeInput(np.array(1));
+    cnn.forwardPropagation()
     predict = np.argmax(softmaxCell.getOutput().value)
     if predict == np.argmax(y):
         precision += 1 / len(images_test)
