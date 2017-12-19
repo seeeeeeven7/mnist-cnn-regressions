@@ -37,7 +37,7 @@ cnn = network.Network();
 # 输入层
 X = var.Variable(np.zeros([28, 28, 1]))
 Y = var.Variable(np.zeros([1, 10]))
-KeepProb = var.Variable(0)
+KeepArray = var.Variable(np.zeros([1, 1024]))
 
 # 卷积层 I
 WC1 = var.Variable(np.random.randn(5, 5, 1, 32) / 10)
@@ -64,22 +64,21 @@ cnn.appendVariable(WC2)
 convCell2 = cell.ConvolutionCell(mpCell1, WC2) # => [14, 14, 64]
 cnn.appendCell(convCell2)
 
-# ReLu Layer 2
+# 激活层 II
 BC2 = var.Variable(np.ones(64) / 10)
 cnn.appendVariable(BC2)
 
 reluCell2 = cell.ReLuCellType1(convCell2, BC2) # => [14, 14, 64]
 cnn.appendCell(reluCell2)
 
-# Max-Pooling Layer 2
+# 池化层 II
 mpCell2 = cell.MaxPoolingCell(reluCell2, [2, 2]) # => [7, 7, 64]
 cnn.appendCell(mpCell2)
 
-# Re-Shape Layer 
+# 全链接层 I
 rsCell = cell.ReShapeCell(mpCell2, [1, 7 * 7 * 64]) # => [1, 7 * 7 * 64]
 cnn.appendCell(rsCell)
 
-# Full-Connected Layer 1
 WFC1 = var.Variable(np.random.randn(7 * 7 * 64, 1024) / 10)
 cnn.appendVariable(WFC1)
 
@@ -93,12 +92,11 @@ reluCell3 = cell.ReLuCellType2(matmulCell1, BFC1)
 cnn.appendCell(reluCell3)
 
 # Drop-out Layer
-KeepProb = var.Variable(np.array(0)) # Input
 
-dropoutCell = cell.DropoutCell(reluCell3, KeepProb) # => [1, 1024]
+dropoutCell = cell.DropoutCell(reluCell3, KeepArray) # => [1, 1024]
 cnn.appendCell(dropoutCell)
 
-# Full-Connected Layer 2
+# 全连接层 II
 WFC2 = var.Variable(np.random.randn(1024, 10) / 10)
 cnn.appendVariable(WFC2)
 
@@ -122,7 +120,7 @@ cnn.appendCell(loss)
 # Training
 BATCH_NUMBER = 20000 # BATCH的数量
 BATCH_SIZE = 50 # BATCH的大小
-LEARNING_RATE = 0.0001 #学习速率
+LEARNING_RATE = 0.001 #学习速率
 for batch_index in range(BATCH_NUMBER):
     # 构造一个BATCH
     batch_xs = [];
@@ -135,36 +133,48 @@ for batch_index in range(BATCH_NUMBER):
         batch_xs.append(x);
         batch_ys.append(y);
 
+    # 评估当前BATCH的准确率
+    if batch_index % 10 == 0:
+        batch_precision = 0
+        for data_index in range(BATCH_SIZE):
+            x = batch_xs[data_index];
+            y = batch_ys[data_index];
+            X.takeInput(x);
+            Y.takeInput(y);
+            KeepArray.takeInput(np.random.binomial(1, 1, [1, 1024]));
+            cnn.forwardPropagation() # 正向传播
+            loss.getOutput().gradient = -1 / BATCH_SIZE # 整个BATCH统一计算梯度，所以单个数据点的输出梯度只有1/BATCH_SIZE
+            predict = np.argmax(softmaxCell.getOutput().value)
+            if predict == np.argmax(y):
+                batch_precision += 1 / BATCH_SIZE
+        print('precision =', batch_precision)
+
     # 使用这个BATCH进行训练
     batch_loss = 0
-    batch_precision = 0
     for data_index in range(BATCH_SIZE):
         x = batch_xs[data_index];
         y = batch_ys[data_index];
         X.takeInput(x);
         Y.takeInput(y);
-        KeepProb.takeInput(np.array(0.5));
+        KeepArray.takeInput(np.random.binomial(1, 0.5, [1, 1024]));
         cnn.forwardPropagation() # 正向传播
         batch_loss += loss.getOutput().value # 统计整个BATCH的损失
         loss.getOutput().gradient = -1 / BATCH_SIZE # 整个BATCH统一计算梯度，所以单个数据点的输出梯度只有1/BATCH_SIZE
         cnn.backwardPropagation() # 反向传播
         # print('    data', data_index, ', loss =', loss.getOutput().value)
-        predict = np.argmax(softmaxCell.getOutput().value)
-        if predict == np.argmax(y):
-        	batch_precision += 1 / BATCH_SIZE
 
     # 应用梯度
     cnn.applyGradient(LEARNING_RATE)
-    print('batch', batch_index, ', loss =', batch_loss, ', precision =', batch_precision)
+    print('batch', batch_index, ', loss =', batch_loss)
 
-# Test
+# 测试
 precision = 0
 for index in range(len(images_test)):
     x = images_test[index];
     y = labels_test[index];
     X.takeInput(x);
     Y.takeInput(y);
-    KeepProb.takeInput(np.array(1));
+    KeepProb.takeInput(np.random.binomial(1, 1, [1, 1024]));
     cnn.forwardPropagation()
     predict = np.argmax(softmaxCell.getOutput().value)
     if predict == np.argmax(y):
