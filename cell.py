@@ -169,7 +169,7 @@ class DropoutCell(Cell):
         # 与分布矩阵相乘，从而“遮罩”某些数值
         self.output = var.Variable(self.input.getOutput().value * self.keeparray.getOutput().value)
     def backwardPropagation(self):
-        self.input.getOutput().gradient = self.output.gradient * self.keeparray.getOutput().value
+        self.input.getOutput().gradient += self.output.gradient * self.keeparray.getOutput().value
     def logOutputValue(self):
         print(self.output.value.shape, np.sum(self.output.value))
     def logOutputGradient(self):
